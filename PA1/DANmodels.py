@@ -23,11 +23,6 @@ import json
 
 
 ##############################################################
-##                      Configuration                       ##
-##############################################################
-
-
-##############################################################
 ##                      Implementation                      ##
 ##############################################################
 
@@ -310,9 +305,9 @@ class DAN(nn.Module):
         # Define the fully connected layers
         self.fc1 = nn.Linear(self.embedding_dim, 100)
         self.do1 = nn.Dropout(p=0.5)
-        self.fc2 = nn.Linear(100, 500)
+        self.fc2 = nn.Linear(100, 200)
         self.do2 = nn.Dropout(p=0.5)
-        self.fc3 = nn.Linear(500, 2)
+        self.fc3 = nn.Linear(200, 2)
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x):

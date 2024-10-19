@@ -25,7 +25,7 @@ In this model, Byte Pair Encoding (BPE) is used for tokenizing sentences into su
 
 ## Usage
 
-To run the sentiment classification task, use the following command format:
+To run the sentiment classification task, navigate to the `PA1` folder and use the following command format:
 
 ```bash
 python main.py --model <MODEL_TYPE> --epochs <NUMBER_OF_EPOCHS>

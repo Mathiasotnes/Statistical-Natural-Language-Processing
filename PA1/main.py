@@ -1,4 +1,4 @@
-# models.py
+# main.py
 
 import torch
 from torch import nn
@@ -16,9 +16,9 @@ from DANmodels import DAN, SentimentDatasetEmbedding, SentimentDatasetBPE, BPETo
 ##                Configuration                 ##
 ##################################################
 
-EMBEDDING_DIM           = 300
+EMBEDDING_DIM           = 50
 EMBEDDING               = f"glove.6B.{EMBEDDING_DIM}d-relativized.txt"
-USE_GLOVE               = False
+USE_GLOVE               = True
 VOCAB_SIZE              = 4096
 TOKENIZER_LOAD_PATH     = f'./tokenizers/bpe_{VOCAB_SIZE}.json'
 TOKENIZER_SAVE_PATH     = f'./tokenizers/bpe_{VOCAB_SIZE}.json'
@@ -106,9 +106,7 @@ def main():
     args = parser.parse_args()
     
     # Assert invalid arguments
-    # assert EMBEDDING_DIM in [50, 300], "Embedding dimension must be 50 or 300"
     assert args.model in ["BOW", "DAN", "SUBWORDDAN"], "Model type must be 'BOW', 'DAN' or 'SUBWORDDAN'"
-    assert args.epochs > 0, "Number of epochs must be greater than 0"
 
     # Check if the model type is "BOW"
     if args.model == "BOW":
@@ -165,7 +163,7 @@ def main():
         plt.savefig(testing_accuracy_file)
         print(f"Dev accuracy plot saved as {testing_accuracy_file}\n\n")
 
-        # plt.show()
+        plt.show()
 
     elif args.model == "DAN":
         
