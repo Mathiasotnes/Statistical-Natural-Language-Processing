@@ -1,1 +1,5 @@
 .DS_Store
+plots/
+tokenizers/
+__pycache__/
+.vscode/

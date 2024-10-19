@@ -2,25 +2,26 @@
 
 import torch
 from torch import nn
-import torch.nn.functional as F
-from sklearn.feature_extraction.text import CountVectorizer
 from sentiment_data import read_sentiment_examples, read_word_embeddings
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import time
 import argparse
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from BOWmodels import SentimentDatasetBOW, NN2BOW, NN3BOW
-from DANmodels import DAN, SentimentDatasetEmbedding
+from DANmodels import DAN, SentimentDatasetEmbedding, SentimentDatasetBPE, BPETokenizer
 
 
 ##################################################
 ##                Configuration                 ##
 ##################################################
 
-EMBEDDING_DIM   = 300
-EMBEDDING       = f"glove.6B.{EMBEDDING_DIM}d-relativized.txt"
-HIDDEN_SIZE     = 200
+EMBEDDING_DIM           = 300
+EMBEDDING               = f"glove.6B.{EMBEDDING_DIM}d-relativized.txt"
+USE_GLOVE               = False
+VOCAB_SIZE              = 4096
+TOKENIZER_LOAD_PATH     = f'./tokenizers/bpe_{VOCAB_SIZE}.json'
+TOKENIZER_SAVE_PATH     = f'./tokenizers/bpe_{VOCAB_SIZE}.json'
 
 
 ##################################################
@@ -105,8 +106,8 @@ def main():
     args = parser.parse_args()
     
     # Assert invalid arguments
-    assert EMBEDDING_DIM in [50, 300], "Embedding dimension must be 50 or 300"
-    assert args.model in ["BOW", "DAN"], "Model type must be 'BOW' or 'DAN'"
+    # assert EMBEDDING_DIM in [50, 300], "Embedding dimension must be 50 or 300"
+    assert args.model in ["BOW", "DAN", "SUBWORDDAN"], "Model type must be 'BOW', 'DAN' or 'SUBWORDDAN'"
     assert args.epochs > 0, "Number of epochs must be greater than 0"
 
     # Check if the model type is "BOW"
@@ -187,7 +188,7 @@ def main():
         print(f"Data loaded in : {elapsed_time} seconds")
 
         # Initialize the DAN model
-        model = DAN(embedding_dim=EMBEDDING_DIM, hidden_size=HIDDEN_SIZE)
+        model = DAN(embedding_dim=EMBEDDING_DIM, use_glove=USE_GLOVE, vocab_size=len(word_embeddings.word_indexer))
         
         # Run experiment with DAN
         train_acc, test_acc = experiment(model, train_loader, test_loader, epochs=args.epochs)
@@ -195,32 +196,68 @@ def main():
         # Plot the training accuracy
         plt.figure(figsize=(8, 6))
         plt.plot(train_acc, label='Training Accuracy')
+        plt.plot(test_acc, label='Dev Accuracy')
         plt.xlabel('Epochs')
-        plt.ylabel('Training Accuracy')
-        plt.title('Training Accuracy for DAN')
+        plt.ylabel('Accuracy (%)')
+        plt.title('Accuracy for DAN')
         plt.legend()
         plt.grid()
         
         # Save the training accuracy figure
-        training_accuracy_file = 'train_accuracy.png'
-        plt.savefig(training_accuracy_file)
-        print(f"\n\nTraining accuracy plot saved as {training_accuracy_file}")
+        accuracy_file = 'accuracy_glove_embeddings.png'
+        plt.savefig(accuracy_file)
+        print(f"\n\nAccuracy plot saved as {accuracy_file}")
         
-        # Plot the testing accuracy
+        plt.show()
+    
+    elif args.model == "SUBWORDDAN":
+        
+        assert VOCAB_SIZE > 66, "Vocabulary size must be greater than 66 (number of ASCII characters)"
+        
+        # Load data
+        start_time = time.time()
+        
+        train_examples = read_sentiment_examples("data/train.txt")
+        dev_examples = read_sentiment_examples("data/dev.txt")
+        
+        # Use the SentimentDatasetBPE class to tokenize the sentences
+        # Create the tokenizer with the training data
+        tokenizer = BPETokenizer(vocab_size=VOCAB_SIZE, examples=train_examples, load_path=TOKENIZER_LOAD_PATH, save_path=TOKENIZER_SAVE_PATH)
+
+        # Pass the tokenizer into both train and dev datasets
+        train_data = SentimentDatasetBPE(train_examples, tokenizer)
+        dev_data = SentimentDatasetBPE(dev_examples, tokenizer)
+        
+        train_loader = DataLoader(train_data, batch_size=16, shuffle=True)
+        test_loader = DataLoader(dev_data, batch_size=16, shuffle=False)
+        
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Data loaded in : {elapsed_time} seconds")
+        
+        # Initialize the DAN model
+        model = DAN(embedding_dim=EMBEDDING_DIM, use_glove=False, vocab_size=VOCAB_SIZE)
+        
+        # Run experiment with DAN
+        train_acc, test_acc = experiment(model, train_loader, test_loader, epochs=args.epochs)
+        
+        # Plot the training accuracy
         plt.figure(figsize=(8, 6))
+        plt.plot(train_acc, label='Training Accuracy')
         plt.plot(test_acc, label='Dev Accuracy')
         plt.xlabel('Epochs')
-        plt.ylabel('Dev Accuracy')
-        plt.title('Dev Accuracy for DAN')
+        plt.ylabel('Accuracy (%)')
+        plt.title('Accuracy for DAN (Subword Tokenization)')
         plt.legend()
         plt.grid()
         
-        # Save the testing accuracy figure
-        testing_accuracy_file = 'dev_accuracy.png'
-        plt.savefig(testing_accuracy_file)
-        print(f"Dev accuracy plot saved as {testing_accuracy_file}\n\n")
-
+        # Save the training accuracy figure
+        accuracy_file = 'accuracy_subword.png'
+        plt.savefig(accuracy_file)
+        print(f"\n\nAccuracy plot saved as {accuracy_file}")
+        
         plt.show()
+
 
 if __name__ == "__main__":
     main()
