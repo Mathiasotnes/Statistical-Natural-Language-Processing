@@ -12,8 +12,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "--model", "DAN",   // Specify the model you want to use (e.g., BOW or DAN)
-                "--epochs", "500"    // Specify the number of epochs
+                "--model", "SUBWORDDAN",   // Specify the model you want to use (e.g., BOW or DAN)
+                "--epochs", "10"    // Specify the number of epochs
             ]
         }
     ]
