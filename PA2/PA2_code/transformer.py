@@ -66,6 +66,9 @@ class MultiHeadAttention(nn.Module):
         if self.masked:
             attn = attn.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
+        
+        # Store attention maps for hooks
+        self.attn_weights = attn
 
         # Compute the attention output
         y = attn @ V
@@ -84,10 +87,11 @@ class TransformerBlock(nn.Module):
         4. Add & Norm
     """
     def __init__( 
-            self, 
-            num_heads:  int, 
-            d_model:    int, 
-            hidden_dim: int, 
+            self,
+            num_heads:  int,
+            d_model:    int,
+            hidden_dim: int,
+            masked:     bool=False,
             dropout:    float=0.1, 
         ) -> None:
         """
@@ -95,10 +99,11 @@ class TransformerBlock(nn.Module):
             num_heads (int):                Number of attention heads.
             d_model (int):                  Dimensionality of the model (Embedding dimension).
             hidden_dim (int):               Hidden layer dimensionality (MLP).
+            masked (bool, optional):        Whether to use causal masked attention or not. Defaults to False.
             dropout (float, optional):      Dropout rate. Defaults to 0.1.
         """
         super(TransformerBlock, self).__init__()
-        self.attn   = MultiHeadAttention(d_model, num_heads)
+        self.attn   = MultiHeadAttention(d_model, num_heads, masked=masked)
         self.ln1    = nn.LayerNorm(d_model)
         self.mlp    = nn.Sequential(
             nn.Linear(d_model, hidden_dim),
@@ -305,6 +310,110 @@ class Encoder(nn.Module):
         for block in self.blocks:
             x = block(x)
         return x
+
+class Decoder(nn.Module):
+    """
+    Decoder model. Consists of:
+        1. Embedding layer
+        2. Positional encoding
+        3. Transformer blocks (masked)
+    """
+    def __init__( 
+            self, 
+            vocab_size: int, 
+            d_model: int, 
+            num_heads: int, 
+            hidden_dim: int, 
+            num_blocks: int, 
+            dropout: float=0.1,
+            echo_specs: bool=True
+        ) -> None:
+        """
+        Args:
+            vocab_size (int):               Size of the vocabulary.
+            d_model (int):                  Dimensionality of the model (Embedding dimension).
+            num_heads (int):                Number of attention heads.
+            hidden_dim (int):               Hidden layer dimensionality (MLP).
+            num_blocks (int):               Number of transformer blocks.
+            dropout (float, optional):      Dropout rate. Defaults to 0.1.
+            echo_spechs (bool, optional):   Whether to print the model specifications. Defaults to True.
+        """
+        super(Decoder, self).__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+        self.dropout = dropout
+        
+        self.emb = nn.Embedding(vocab_size, d_model)
+        self.pos_enc = AbsolutePositionalEncoding(d_model, dropout)
+        self.blocks = nn.ModuleList([
+            TransformerBlock(num_heads, d_model, hidden_dim, masked=True, dropout=dropout) for _ in range(num_blocks)
+        ])
+        
+        if echo_specs: print(self)
+    
+    def __repr__( self ) -> str:
+        """
+        Returns a string representation of the model specifications.
+        """
+        # Calculate total trainable parameters
+        total_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        
+        # Build the string
+        model_str = f"\n\rDecoder Model Specifications:\n"
+        model_str += f"{'='*40}\n"
+        model_str += f"Vocabulary Size:          {self.vocab_size}\n"
+        model_str += f"Embedding Dimension:      {self.d_model}\n"
+        model_str += f"Number of Heads:          {self.num_heads}\n"
+        model_str += f"Number of Blocks:         {self.num_blocks}\n"
+        model_str += f"Hidden Dimension (MLP):   {self.hidden_dim}\n"
+        model_str += f"Dropout Rate:             {self.dropout}\n"
+        model_str += f"Total Parameters:         {total_params}\n"
+        model_str += f"{'='*40}\n"
+        model_str += f"Trainable Parameters per Component:\n"
+
+        # Components and their parameter counts
+        components = [
+            ('Embedding Layer:    ', self.emb),
+            ('Positional Encoding:', self.pos_enc),
+        ]
+
+        # Add Transformer Blocks
+        for i, block in enumerate(self.blocks):
+            components.append((f'Transformer Block {i+1}:', block))
+
+        # Calculate and append parameter counts for each component
+        for name, module in components:
+            num_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
+            model_str += f"  * {name} {num_params}\n"
+
+        model_str += f"{'='*40}\n"
+        return model_str
+    
+    def forward( self, x: Tensor, targets: Tensor=None ) -> Tensor:
+        """
+        Forward pass through the decoder.
+
+        Args:
+            x (Tensor):                     Input tensor. (batch_size, seq_length)
+            targets (Tensor, optional):     Target tensor. Defaults to None.
+
+        Returns:
+            x (Tensor):                     Decoded representation. (batch_size, seq_length, d_model)
+            loss (Tensor):                  Loss value. Defaults to None.
+            
+        """
+        x = self.emb(x)
+        x = self.pos_enc(x)
+        for block in self.blocks:
+            x = block(x)
+        logits = F.linear(x, self.emb.weight)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return x, loss
         
 class CLSModel(nn.Module):
     """

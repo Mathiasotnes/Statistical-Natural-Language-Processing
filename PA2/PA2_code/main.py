@@ -14,12 +14,13 @@ from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 import os
 import time
+from itertools import cycle
 
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
 
 from utilities import Utilities
-from transformer import CLSModel, Encoder
+from transformer import CLSModel, Encoder, Decoder
 
 
 #######################
@@ -54,8 +55,7 @@ eval_iters = 200  # Number of iterations to evaluate perplexity on the test set
 n_input = 64  # Input size for the classifier, should match the embedding size of the transformer
 n_hidden = 100  # Hidden size for the classifier
 n_output = 3  # Output size for the classifier, we have 3 classes
-# epochs_CLS = 15 # epochs for classifier training
-epochs_CLS = 50
+epochs_CLS = 15 # epochs for classifier training
 
 
 #######################
@@ -103,18 +103,19 @@ def compute_classifier_accuracy(classifier, data_loader):
         return accuracy
 
 def compute_perplexity(decoderLMmodel, data_loader, eval_iters=100):
-    """ Compute the perplexity of the decoderLMmodel on the data in data_loader.
+    """ 
+    Compute the perplexity of the decoderLMmodel on the data in data_loader.
     Make sure to use the cross entropy loss for the decoderLMmodel.
     """
     decoderLMmodel.eval()
-    losses= []
+    losses = []
+    total_loss = 0
     for X, Y in data_loader:
         X, Y = X.to(device), Y.to(device)
-        loss = decoderLMmodel(X, Y) # your model should be computing the cross entropy loss
+        pred, loss = decoderLMmodel(X, Y)
         losses.append(loss.item())
         total_loss += loss.item()
         if len(losses) >= eval_iters: break
-
 
     losses = torch.tensor(losses)
     mean_loss = losses.mean()
@@ -124,7 +125,7 @@ def compute_perplexity(decoderLMmodel, data_loader, eval_iters=100):
     return perplexity
 
 def train_classifier(classifier, train_loader, test_loader, epochs):
-    """ Train the classifier on the train_loader and evaluate on the test_loader."""
+    """ Train the classifier on the train_loader and evaluate on the test_loader. """
     optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
     loss_fn = torch.nn.CrossEntropyLoss()
     for epoch in range(epochs):
@@ -140,11 +141,44 @@ def train_classifier(classifier, train_loader, test_loader, epochs):
         print(f"Epoch {epoch + 1}: Train accuracy: {train_accuracy:.2f}%, Test accuracy: {test_accuracy:.2f}%")
     return classifier
 
+def train_language_model(decoderLMmodel, train_loader):
+    """Trains the language model on the train_loader and evaluates on the test_loader."""
+    optimizer = torch.optim.Adam(decoderLMmodel.parameters(), lr=learning_rate)
+    decoderLMmodel.train()
+    total_loss = 0
+    train_loader_iter = cycle(train_loader)  # Infinite iterator to keep training until max_iters
+    for i in range(max_iters+1):
+        xb, yb = next(train_loader_iter)
+        xb, yb = xb.to(device), yb.to(device)
+        optimizer.zero_grad()
+        logits, loss = decoderLMmodel(xb, yb)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+        if i % eval_interval == 0 and i > 0:
+            perplexity = compute_perplexity(decoderLMmodel, train_loader, eval_iters)
+            print(f"Iteration {i}: Perplexity: {perplexity:.2f}")
+            total_loss = 0
+    return decoderLMmodel
+
 
 #######################
 ## Main program entry
 
 def main():
+    
+    #######################
+    ## Configuration 
+    classifier  = False
+    LMmodel     = True
+    
+    LMtrain     = True
+    obama       = False
+    wbush       = False
+    hbush       = False
+    
+    #######################
+    ## Main program
     
     print(f"\r\n{'='*40}")
     print("| Transformer Blocks (PA2) - CSE 256   |")
@@ -164,11 +198,29 @@ def main():
     train_CLS_loader = DataLoader(train_CLS_dataset, batch_size=batch_size,collate_fn=collate_batch,shuffle=True)
     test_CLS_loader = DataLoader(test_CLS_dataset, batch_size=batch_size,collate_fn=collate_batch,shuffle=False)
   
-    inputfile = "speechesdataset/train_LM.txt"
-    with open(inputfile, 'r', encoding='utf-8') as f:
+    
+    trainLMTextFile = "speechesdataset/train_LM.txt"
+    testLMObamaTextFile = "speechesdataset/test_LM_obama.txt"
+    testLMWBushTextFile = "speechesdataset/test_LM_wbush.txt"
+    testLMHBushTextFile = "speechesdataset/test_LM_hbush.txt"
+    
+    with open(trainLMTextFile, 'r', encoding='utf-8') as f:
         lmtrainText = f.read()
-    train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
-    train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
+    with open(testLMObamaTextFile, 'r', encoding='utf-8') as f:
+        lmtestObamaText = f.read()
+    with open(testLMWBushTextFile, 'r', encoding='utf-8') as f:
+        lmtestWBushText = f.read()
+    with open(testLMHBushTextFile, 'r', encoding='utf-8') as f:
+        lmtestHBushText = f.read()
+        
+    train_LM_dataset        = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
+    test_LM_obama_dataset   = LanguageModelingDataset(tokenizer, lmtestObamaText, block_size)
+    test_LM_wbush_dataset   = LanguageModelingDataset(tokenizer, lmtestWBushText, block_size)
+    test_LM_hbush_dataset   = LanguageModelingDataset(tokenizer, lmtestHBushText, block_size)
+    train_LM_loader         = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
+    test_LM_obama_loader    = DataLoader(test_LM_obama_dataset, batch_size=batch_size, shuffle=False)
+    test_LM_wbush_loader    = DataLoader(test_LM_wbush_dataset, batch_size=batch_size, shuffle=False)
+    test_LM_hbush_loader    = DataLoader(test_LM_hbush_dataset, batch_size=batch_size, shuffle=False)
     
     t_data = time.time() - t0
     print(f"Successfully loaded data in {t_data:.3f} seconds")
@@ -177,38 +229,100 @@ def main():
     #######################
     ## CLS Model
     
-    print(f"\r\n{'='*40}")
-    print("Classifier Model (CLS)")
-    print(f"{'='*40}\r\n")
-    
-    encoder = Encoder(
-        vocab_size=tokenizer.vocab_size,
-        d_model=n_embd,
-        num_heads=n_head,
-        num_blocks=n_layer,
-        hidden_dim=100, # Hidden dimension for the MLP in the transformer block
-        echo_specs=True
-    ).to(device)
-    
-    cls_model = CLSModel(
-        encoder=encoder,
-        n_hidden=n_hidden,
-        num_classes=n_output
-    ).to(device)
-    
-    # Sanity check
-    # utils = Utilities(tokenizer, cls_model)
-    # utils.sanity_check("The quick brown fox jumps over the lazy dog", block_size)
-    # return
+    if classifier:
+        print(f"\r\n{'='*40}")
+        print("Classifier Model (CLS)")
+        print(f"{'='*40}\r\n")
+        
+        encoder = Encoder(
+            vocab_size=tokenizer.vocab_size,
+            d_model=n_embd,
+            num_heads=n_head,
+            num_blocks=n_layer,
+            hidden_dim=64, # Hidden dimension for the MLP in the transformer block
+            dropout=0.0,
+            echo_specs=True
+        ).to(device)
+        
+        cls_model = CLSModel(
+            encoder=encoder,
+            n_hidden=n_hidden,
+            num_classes=n_output
+        ).to(device)
+        
+        train_classifier(cls_model, train_CLS_loader, test_CLS_loader, epochs_CLS)
+        
+        # Sanity check
+        utils = Utilities(tokenizer, cls_model)
+        utils.sanity_check("The quick brown fox eats the lazy dog", block_size, show_plots=False, save_plots=True)
 
-    train_classifier(cls_model, train_CLS_loader, test_CLS_loader, epochs_CLS)
-
-    # for the language modeling task, you will iterate over the training data for a fixed number of iterations like this:
-    for i, (xb, yb) in enumerate(train_LM_loader):
-        if i >= max_iters:
-            break
-        xb, yb = xb.to(device), yb.to(device)
-        # LM training code here
+    
+    #######################
+    ## Language Model
+    
+    if LMmodel:
+        
+        if LMtrain:
+            decoder = Decoder(
+                vocab_size=tokenizer.vocab_size,
+                d_model=n_embd,
+                num_heads=n_head,
+                num_blocks=n_layer,
+                hidden_dim=100,
+                dropout=0.0,
+                echo_specs=True
+            ).to(device)
+            train_language_model(decoder, train_LM_loader)
+            
+            # Sanity check
+            utils = Utilities(tokenizer, decoder)
+            utils.sanity_check("The quick brown fox eats the lazy dog", block_size, show_plots=False, save_plots=True)
+        
+        if obama:
+            # Compute perplexity on the test set
+            decoder = Decoder(
+                vocab_size=tokenizer.vocab_size,
+                d_model=n_embd,
+                num_heads=n_head,
+                num_blocks=n_layer,
+                hidden_dim=100,
+                dropout=0.0,
+                echo_specs=False
+            ).to(device)
+            print(f"\r\n{'='*40}")
+            print("Training on obama test set...")
+            print(f"{'='*40}\r\n")
+            train_language_model(decoder, test_LM_obama_loader)
+        
+        if wbush:
+            decoder = Decoder(
+                vocab_size=tokenizer.vocab_size,
+                d_model=n_embd,
+                num_heads=n_head,
+                num_blocks=n_layer,
+                hidden_dim=100,
+                dropout=0.0,
+                echo_specs=False
+            ).to(device)
+            print(f"\r\n{'='*40}")
+            print("Training on wbush test set...")
+            print(f"{'='*40}\r\n")
+            train_language_model(decoder, test_LM_wbush_loader)
+        
+        if hbush:
+            decoder = Decoder(
+                vocab_size=tokenizer.vocab_size,
+                d_model=n_embd,
+                num_heads=n_head,
+                num_blocks=n_layer,
+                hidden_dim=100,
+                dropout=0.0,
+                echo_specs=False
+            ).to(device)
+            print(f"\r\n{'='*40}")
+            print("Training on hbush test set...")
+            print(f"{'='*40}\r\n")
+            train_language_model(decoder, test_LM_hbush_loader)
 
     t_end = time.time() - t0
     print(f"\r\nProgram executed in {t_end:.3f} seconds\r\n")
