@@ -54,7 +54,7 @@ class Utilities:
             # Create a heatmap of the attention map
             fig, ax = plt.subplots()
             cax = ax.imshow(att_map[0], cmap='hot', interpolation='nearest')
-            ax.xaxis.tick_top()  
+            ax.xaxis.tick_top()
             fig.colorbar(cax, ax=ax)  
             plt.title(f"Attention Map {j + 1}")
             

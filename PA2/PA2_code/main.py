@@ -15,6 +15,7 @@ from torch.nn.utils.rnn import pad_sequence
 import os
 import time
 from itertools import cycle
+import matplotlib.pyplot as plt
 
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
@@ -53,7 +54,7 @@ eval_iters = 200  # Number of iterations to evaluate perplexity on the test set
 ## size of 64, hidden size of 50 and output size of 3.
 
 n_input = 64  # Input size for the classifier, should match the embedding size of the transformer
-n_hidden = 100  # Hidden size for the classifier
+n_hidden = 50  # Hidden size for the classifier
 n_output = 3  # Output size for the classifier, we have 3 classes
 epochs_CLS = 15 # epochs for classifier training
 
@@ -124,10 +125,12 @@ def compute_perplexity(decoderLMmodel, data_loader, eval_iters=100):
     decoderLMmodel.train()
     return perplexity
 
-def train_classifier(classifier, train_loader, test_loader, epochs):
+def train_classifier(classifier, train_loader, test_loader, epochs, plot=False):
     """ Train the classifier on the train_loader and evaluate on the test_loader. """
     optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
     loss_fn = torch.nn.CrossEntropyLoss()
+    train_accuracies = []
+    test_accuracies = []
     for epoch in range(epochs):
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
@@ -139,6 +142,17 @@ def train_classifier(classifier, train_loader, test_loader, epochs):
         train_accuracy = compute_classifier_accuracy(classifier, train_loader)
         test_accuracy = compute_classifier_accuracy(classifier, test_loader)
         print(f"Epoch {epoch + 1}: Train accuracy: {train_accuracy:.2f}%, Test accuracy: {test_accuracy:.2f}%")
+        train_accuracies.append(train_accuracy)
+        test_accuracies.append(test_accuracy)
+    if plot:
+        plt.plot(train_accuracies, label="Train accuracy")
+        plt.plot(test_accuracies, label="Test accuracy")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy (%)")
+        plt.legend()
+        plt.title("Classifier Training")
+        plt.grid(which='both')
+        plt.show()
     return classifier
 
 def train_language_model(decoderLMmodel, train_loader):
@@ -169,13 +183,23 @@ def main():
     
     #######################
     ## Configuration 
-    classifier  = False
-    LMmodel     = True
     
-    LMtrain     = True
-    obama       = False
-    wbush       = False
-    hbush       = False
+    # Models to run
+    classifier              = False
+    LMmodel                 = True
+    
+    # LMmodel sub-configurations
+    LMtrain                 = True
+    obama                   = True
+    wbush                   = True
+    hbush                   = True
+    
+    # Verbosity
+    plot                    = False
+    echo_encoder_specs      = False
+    echo_classifier_specs   = False
+    
+    
     
     #######################
     ## Main program
@@ -241,20 +265,21 @@ def main():
             num_blocks=n_layer,
             hidden_dim=64, # Hidden dimension for the MLP in the transformer block
             dropout=0.0,
-            echo_specs=True
+            echo_specs=echo_encoder_specs
         ).to(device)
         
         cls_model = CLSModel(
             encoder=encoder,
             n_hidden=n_hidden,
-            num_classes=n_output
+            num_classes=n_output,
+            echo_specs=echo_classifier_specs
         ).to(device)
         
-        train_classifier(cls_model, train_CLS_loader, test_CLS_loader, epochs_CLS)
+        train_classifier(cls_model, train_CLS_loader, test_CLS_loader, epochs_CLS, plot=plot)
         
         # Sanity check
         utils = Utilities(tokenizer, cls_model)
-        utils.sanity_check("The quick brown fox eats the lazy dog", block_size, show_plots=False, save_plots=True)
+        utils.sanity_check("And that is why I intend to personally pursue this outcome with all the patience and dedication that the task requires.", block_size, show_plots=False, save_plots=True)
 
     
     #######################
@@ -269,7 +294,7 @@ def main():
                 num_heads=n_head,
                 num_blocks=n_layer,
                 hidden_dim=100,
-                dropout=0.0,
+                dropout=0.2,
                 echo_specs=True
             ).to(device)
             train_language_model(decoder, train_LM_loader)

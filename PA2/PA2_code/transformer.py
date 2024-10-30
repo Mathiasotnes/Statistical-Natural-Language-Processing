@@ -1,6 +1,6 @@
 #########################################################
 ## CSE 256 - Statistical Natural Language Processing   ##
-## Interpolation assignment (A2)                       ##
+## Transformer assignment (PA2)                        ##
 ## --------------------------------------------------- ##
 ## Author:   Mathias Otnes                             ##
 ## Date:     2024-10-22                                ##
@@ -25,12 +25,18 @@ class MultiHeadAttention(nn.Module):
     modules, because this would reduce the ability to perform efficient parallel computation.
     
     Args:
-        d_model (int):          Dimensionality of the model (Embedding dimension).
-        num_heads (int):        Number of attention heads.
-        context_window (int):   Size of the context window. Defaults to d_model.
-        masked (bool):          Whether to use causal masked attention or not.
+        d_model (int):                  Dimensionality of the model (Embedding dimension).
+        num_heads (int):                Number of attention heads.
+        context_window (int):           Size of the context window. Defaults to d_model.
+        masked (bool):                  Whether to use causal masked attention or not.
     """
-    def __init__( self, d_model: int, num_heads: int, context_window: int=None, masked: bool=False ) -> None:
+    def __init__( 
+            self, 
+            d_model: int, 
+            num_heads: int, 
+            context_window: int=None, 
+            masked: bool=False,
+        ) -> None:
         super(MultiHeadAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
 
@@ -62,7 +68,7 @@ class MultiHeadAttention(nn.Module):
         V = V.view(B, T, self.nh, self.d_k).transpose(1, 2) # (B, T, nh, d_k) -> (B, nh, T, d_k)
 
         # Scaled dot-product attention
-        attn = (Q @ K).transpose(-2, -1) / math.sqrt(self.d_k)
+        attn = (Q @ K.transpose(-2, -1)) / math.sqrt(self.d_k)
         if self.masked:
             attn = attn.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
@@ -124,11 +130,8 @@ class TransformerBlock(nn.Module):
         Returns:
             Tensor: Output tensor.
         """
-        x = x + self.attn(x)
-        x = self.ln1(x)
-        x = x + self.mlp(x)
-        x = x + self.do(x)
-        x = self.ln2(x)
+        x = x + self.attn(self.ln1(x))
+        x = x + self.do(self.mlp(self.ln2(x)))
         return x
     
 class AbsolutePositionalEncoding(nn.Module):
@@ -348,9 +351,9 @@ class Decoder(nn.Module):
         
         self.emb = nn.Embedding(vocab_size, d_model)
         self.pos_enc = AbsolutePositionalEncoding(d_model, dropout)
-        self.blocks = nn.ModuleList([
-            TransformerBlock(num_heads, d_model, hidden_dim, masked=True, dropout=dropout) for _ in range(num_blocks)
-        ])
+        self.blocks = nn.Sequential(*[TransformerBlock(num_heads=num_heads, d_model=d_model, hidden_dim=hidden_dim, masked=True, dropout=dropout) for _ in range(num_blocks)])
+        self.ln_f = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size)
         
         if echo_specs: print(self)
     
@@ -407,9 +410,9 @@ class Decoder(nn.Module):
         """
         x = self.emb(x)
         x = self.pos_enc(x)
-        for block in self.blocks:
-            x = block(x)
-        logits = F.linear(x, self.emb.weight)
+        x = self.blocks(x)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
@@ -421,17 +424,31 @@ class CLSModel(nn.Module):
         1. Encoder
         2. Classification layer
     """
-    def __init__( self, encoder: Encoder, n_hidden: int, num_classes: int ) -> None:
+    def __init__( self, encoder: Encoder, n_hidden: int, num_classes: int, echo_specs: bool=True ) -> None:
         """
         Args:
-            encoder (Encoder):      Encoder model.
-            n_hidden (int):         Hidden layer dimensionality.
-            num_classes (int):      Number of classes.
+            encoder (Encoder):              Encoder model.
+            n_hidden (int):                 Hidden layer dimensionality.
+            num_classes (int):              Number of classes.
+            echo_specs (bool, optional):    Whether to print the model specifications. Defaults to True.
         """
         super(CLSModel, self).__init__()
         self.encoder    = encoder
         self.ff         = nn.Linear(encoder.d_model, n_hidden)
         self.cls        = nn.Linear(n_hidden, num_classes)
+        if echo_specs: print(self)
+        
+    def __repr__(self) -> str:
+        total_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        model_str = f"\n\rCLSModel Specifications:\n"
+        model_str += f"{'='*40}\n"
+        model_str += f"Total Parameters: {total_params}\n"
+        model_str += f"{'='*40}\n"
+        model_str += f"Trainable Parameters per Component:\n"
+        model_str += f"  * Encoder Parameters: {sum(p.numel() for p in self.encoder.parameters() if p.requires_grad)}\n"
+        model_str += f"  * Classifier Parameters: {total_params - sum(p.numel() for p in self.encoder.parameters() if p.requires_grad)}\n"
+        model_str += f"{'='*40}\n"
+        return model_str
     
     def forward( self, x: Tensor ) -> Tensor:
         """
@@ -447,5 +464,5 @@ class CLSModel(nn.Module):
         x = self.encoder(x)
         x = x.mean(dim=1)
         x = F.relu(self.ff(x))
-        x = F.softmax(self.cls(x), dim=-1)
+        x = self.cls(x)
         return x
