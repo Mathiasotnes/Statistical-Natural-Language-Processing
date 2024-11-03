@@ -83,7 +83,7 @@ class MultiHeadAttention(nn.Module):
         # Final linear projection
         y = self.W_o(y)
         return y
-    
+        
 class TransformerBlock(nn.Module):
     """
     Transformer block consisting of: 
@@ -381,6 +381,8 @@ class Decoder(nn.Module):
         components = [
             ('Embedding Layer:    ', self.emb),
             ('Positional Encoding:', self.pos_enc),
+            ('Linear Head:        ', self.lm_head),
+            ('Layer Norm:         ', self.ln_f),
         ]
 
         # Add Transformer Blocks
@@ -434,6 +436,7 @@ class CLSModel(nn.Module):
         """
         super(CLSModel, self).__init__()
         self.encoder    = encoder
+        self.num_heads  = encoder.num_heads
         self.ff         = nn.Linear(encoder.d_model, n_hidden)
         self.cls        = nn.Linear(n_hidden, num_classes)
         if echo_specs: print(self)
@@ -466,3 +469,4 @@ class CLSModel(nn.Module):
         x = F.relu(self.ff(x))
         x = self.cls(x)
         return x
+    

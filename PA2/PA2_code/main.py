@@ -16,13 +16,14 @@ import os
 import time
 from itertools import cycle
 import matplotlib.pyplot as plt
+import argparse
 
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
 
 from utilities import Utilities
 from transformer import CLSModel, Encoder, Decoder
-
+from disentangled_attention import DisentangledDecoder
 
 #######################
 ## Constants
@@ -155,12 +156,13 @@ def train_classifier(classifier, train_loader, test_loader, epochs, plot=False):
         plt.show()
     return classifier
 
-def train_language_model(decoderLMmodel, train_loader):
+def train_language_model(decoderLMmodel, train_loader, plot=False):
     """Trains the language model on the train_loader and evaluates on the test_loader."""
     optimizer = torch.optim.Adam(decoderLMmodel.parameters(), lr=learning_rate)
     decoderLMmodel.train()
     total_loss = 0
     train_loader_iter = cycle(train_loader)  # Infinite iterator to keep training until max_iters
+    perplexities = []
     for i in range(max_iters+1):
         xb, yb = next(train_loader_iter)
         xb, yb = xb.to(device), yb.to(device)
@@ -171,34 +173,110 @@ def train_language_model(decoderLMmodel, train_loader):
         total_loss += loss.item()
         if i % eval_interval == 0 and i > 0:
             perplexity = compute_perplexity(decoderLMmodel, train_loader, eval_iters)
+            perplexities.append(perplexity)
             print(f"Iteration {i}: Perplexity: {perplexity:.2f}")
             total_loss = 0
+    if plot:
+        plt.plot(perplexities)
+        plt.xlabel("Iteration")
+        plt.ylabel("Perplexity")
+        plt.title("Language Model Training (Obama)")
+        plt.grid(which='both')
+        plt.show()
     return decoderLMmodel
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Run different parts of the NLP models: classifier, language model, and disentangled language model."
+    )
+    
+    parser.add_argument(
+        '--part1',
+        action='store_true',
+        help='Run the classifier model.'
+    )
+    
+    parser.add_argument(
+        '--part2',
+        action='store_true',
+        help='Run the language model.'
+    )
+    
+    parser.add_argument(
+        '--part3',
+        action='store_true',
+        help='Run the disentangled language model.'
+    )
+    
+    # Optional arguments for LM sub-configurations
+    parser.add_argument(
+        '--train-lm',
+        action='store_true',
+        help='Train the language model.'
+    )
+    
+    parser.add_argument(
+        '--obama',
+        action='store_true',
+        help='Run LM on Obama test set.'
+    )
+    
+    parser.add_argument(
+        '--wbush',
+        action='store_true',
+        help='Run LM on W. Bush test set.'
+    )
+    
+    parser.add_argument(
+        '--hbush',
+        action='store_true',
+        help='Run LM on H. Bush test set.'
+    )
+    
+    # Optional arguments for verbosity and plotting
+    parser.add_argument(
+        '--show_plot',
+        action='store_true',
+        help='Plot training results.'
+    )
+    
+    parser.add_argument(
+        '--save_plot',
+        action='store_true',
+        help='Plot training results.'
+    )
+    
+    return parser.parse_args()
 
 #######################
 ## Main program entry
 
-def main():
+def main(args):
     
     #######################
     ## Configuration 
     
     # Models to run
-    classifier              = False
-    LMmodel                 = True
+    classifier  = args.part1
+    LMmodel     = args.part2
+    DELMmodel   = args.part3
     
     # LMmodel sub-configurations
-    LMtrain                 = True
-    obama                   = True
-    wbush                   = True
-    hbush                   = True
+    LMtrain     = args.train_lm
+    obama       = args.obama
+    wbush       = args.wbush
+    hbush       = args.hbush
     
-    # Verbosity
-    plot                    = False
-    echo_encoder_specs      = False
-    echo_classifier_specs   = False
+    # Train all models if no specific sub-configurations are set
+    if not (obama or wbush or hbush):
+        LMtrain = True
+        obama   = True
+        wbush   = True
+        hbush   = True
     
+    # Plotting
+    show_plot   = args.show_plot
+    save_plot   = args.save_plot
     
     
     #######################
@@ -219,10 +297,9 @@ def main():
 
     train_CLS_dataset = SpeechesClassificationDataset(tokenizer, "speechesdataset/train_CLS.tsv")
     test_CLS_dataset = SpeechesClassificationDataset(tokenizer, "speechesdataset/test_CLS.tsv")
-    train_CLS_loader = DataLoader(train_CLS_dataset, batch_size=batch_size,collate_fn=collate_batch,shuffle=True)
-    test_CLS_loader = DataLoader(test_CLS_dataset, batch_size=batch_size,collate_fn=collate_batch,shuffle=False)
+    train_CLS_loader = DataLoader(train_CLS_dataset, batch_size=batch_size, collate_fn=collate_batch, shuffle=True)
+    test_CLS_loader = DataLoader(test_CLS_dataset, batch_size=batch_size, collate_fn=collate_batch, shuffle=False)
   
-    
     trainLMTextFile = "speechesdataset/train_LM.txt"
     testLMObamaTextFile = "speechesdataset/test_LM_obama.txt"
     testLMWBushTextFile = "speechesdataset/test_LM_wbush.txt"
@@ -263,23 +340,23 @@ def main():
             d_model=n_embd,
             num_heads=n_head,
             num_blocks=n_layer,
-            hidden_dim=64, # Hidden dimension for the MLP in the transformer block
+            hidden_dim=n_hidden,
             dropout=0.0,
-            echo_specs=echo_encoder_specs
+            echo_specs=True
         ).to(device)
         
         cls_model = CLSModel(
             encoder=encoder,
             n_hidden=n_hidden,
             num_classes=n_output,
-            echo_specs=echo_classifier_specs
+            echo_specs=True
         ).to(device)
         
-        train_classifier(cls_model, train_CLS_loader, test_CLS_loader, epochs_CLS, plot=plot)
+        train_classifier(cls_model, train_CLS_loader, test_CLS_loader, epochs_CLS, plot=show_plot)
         
         # Sanity check
         utils = Utilities(tokenizer, cls_model)
-        utils.sanity_check("And that is why I intend to personally pursue this outcome with all the patience and dedication that the task requires.", block_size, show_plots=False, save_plots=True)
+        utils.sanity_check("And that is why I intend to personally pursue this outcome with all the patience and dedication that the task requires.", block_size, show_plots=show_plot, save_plots=save_plot)
 
     
     #######################
@@ -288,23 +365,28 @@ def main():
     if LMmodel:
         
         if LMtrain:
+            print(f"\r\n{'='*40}")
+            print("Training Language Model (LM)")
+            print(f"{'='*40}\r\n")
             decoder = Decoder(
                 vocab_size=tokenizer.vocab_size,
                 d_model=n_embd,
                 num_heads=n_head,
                 num_blocks=n_layer,
                 hidden_dim=100,
-                dropout=0.2,
+                dropout=0.0,
                 echo_specs=True
             ).to(device)
             train_language_model(decoder, train_LM_loader)
             
             # Sanity check
             utils = Utilities(tokenizer, decoder)
-            utils.sanity_check("The quick brown fox eats the lazy dog", block_size, show_plots=False, save_plots=True)
+            utils.sanity_check("The quick brown fox eats the lazy dog", block_size, show_plots=show_plot, save_plots=save_plot)
         
         if obama:
-            # Compute perplexity on the test set
+            print(f"\r\n{'='*40}")
+            print("Obama model")
+            print(f"{'='*40}\r\n")
             decoder = Decoder(
                 vocab_size=tokenizer.vocab_size,
                 d_model=n_embd,
@@ -312,14 +394,21 @@ def main():
                 num_blocks=n_layer,
                 hidden_dim=100,
                 dropout=0.0,
-                echo_specs=False
+                echo_specs=True
             ).to(device)
             print(f"\r\n{'='*40}")
-            print("Training on obama test set...")
+            print("Training on Obama test set...")
             print(f"{'='*40}\r\n")
             train_language_model(decoder, test_LM_obama_loader)
+            
+            # Sanity check
+            utils = Utilities(tokenizer, decoder)
+            utils.sanity_check("America, we weaken those ties when we allow our political dialogue to become so corrosive that people of good character aren't even willing to enter into public service; so coarse with rancor that Americans with whom we disagree are seen not just as misguided, but as malevolent.", block_size, show_plots=show_plot, save_plots=save_plot)
         
         if wbush:
+            print(f"\r\n{'='*40}")
+            print("W. Bush model")
+            print(f"{'='*40}\r\n")
             decoder = Decoder(
                 vocab_size=tokenizer.vocab_size,
                 d_model=n_embd,
@@ -327,14 +416,17 @@ def main():
                 num_blocks=n_layer,
                 hidden_dim=100,
                 dropout=0.0,
-                echo_specs=False
+                echo_specs=True
             ).to(device)
             print(f"\r\n{'='*40}")
-            print("Training on wbush test set...")
+            print("Training on W. Bush test set...")
             print(f"{'='*40}\r\n")
             train_language_model(decoder, test_LM_wbush_loader)
         
         if hbush:
+            print(f"\r\n{'='*40}")
+            print("H. Bush model")
+            print(f"{'='*40}\r\n")
             decoder = Decoder(
                 vocab_size=tokenizer.vocab_size,
                 d_model=n_embd,
@@ -342,16 +434,38 @@ def main():
                 num_blocks=n_layer,
                 hidden_dim=100,
                 dropout=0.0,
-                echo_specs=False
+                echo_specs=True
             ).to(device)
             print(f"\r\n{'='*40}")
-            print("Training on hbush test set...")
+            print("Training on H. Bush test set...")
             print(f"{'='*40}\r\n")
             train_language_model(decoder, test_LM_hbush_loader)
+    
+    if DELMmodel:
+        print(f"\r\n{'='*40}")
+        print("Disentangled Language Model (DELM)")
+        print(f"{'='*40}\r\n")
+        
+        decoder = DisentangledDecoder(
+            vocab_size=tokenizer.vocab_size,
+            d_model=n_embd,
+            num_heads=n_head,
+            num_blocks=n_layer,
+            hidden_dim=100,
+            dropout=0.0,
+            echo_specs=True
+        ).to(device)
+        
+        train_language_model(decoder, train_LM_loader)
+        
+        # Sanity check
+        utils = Utilities(tokenizer, decoder)
+        utils.sanity_check("The quick brown fox eats the lazy dog", block_size, show_plots=show_plot, save_plots=save_plot)
 
     t_end = time.time() - t0
     print(f"\r\nProgram executed in {t_end:.3f} seconds\r\n")
-    
+
 if __name__ == "__main__":
-    main()
+    args = parse_arguments()
+    main(args)
     exit(0)
