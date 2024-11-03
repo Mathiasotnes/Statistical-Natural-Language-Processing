@@ -1,9 +1,9 @@
 #########################################################
 ## CSE 256 - Statistical Natural Language Processing   ##
-## Interpolation assignment (A2)                       ##
+## Transformer assignment (PA2)                        ##
 ## --------------------------------------------------- ##
 ## Author:   Mathias Otnes                             ##
-## Date:     2024-10-22                                ##
+## Date:     2024-11-06                                ##
 #########################################################
 
 #######################
@@ -422,6 +422,10 @@ def main(args):
             print("Training on W. Bush test set...")
             print(f"{'='*40}\r\n")
             train_language_model(decoder, test_LM_wbush_loader)
+            
+            # Sanity check
+            utils = Utilities(tokenizer, decoder)
+            utils.sanity_check("America, we weaken those ties when we allow our political dialogue to become so corrosive that people of good character aren't even willing to enter into public service; so coarse with rancor that Americans with whom we disagree are seen not just as misguided, but as malevolent.", block_size, show_plots=show_plot, save_plots=save_plot)
         
         if hbush:
             print(f"\r\n{'='*40}")
@@ -440,6 +444,10 @@ def main(args):
             print("Training on H. Bush test set...")
             print(f"{'='*40}\r\n")
             train_language_model(decoder, test_LM_hbush_loader)
+            
+            # Sanity check
+            utils = Utilities(tokenizer, decoder)
+            utils.sanity_check("America, we weaken those ties when we allow our political dialogue to become so corrosive that people of good character aren't even willing to enter into public service; so coarse with rancor that Americans with whom we disagree are seen not just as misguided, but as malevolent.", block_size, show_plots=show_plot, save_plots=save_plot)
     
     if DELMmodel:
         print(f"\r\n{'='*40}")
